@@ -1,6 +1,2 @@
 streamlit
-mlflow
-databricks-sdk
-databricks-connect
-pandas
-numpy
+requests
