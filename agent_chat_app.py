@@ -15,6 +15,7 @@ y permite chatear con el agente clínico sobre riesgo de reingreso.
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 SERVING_ENDPOINT = os.environ.get("DATABRICKS_SERVING_ENDPOINT")
+DATABRICKS_TIMEOUT = int(os.environ.get("DATABRICKS_TIMEOUT", "120"))
 
 if not (DATABRICKS_HOST and DATABRICKS_TOKEN and SERVING_ENDPOINT):
     st.error("Faltan variables DATABRICKS_HOST, DATABRICKS_TOKEN o DATABRICKS_SERVING_ENDPOINT en los secrets de Streamlit.")
@@ -28,19 +29,19 @@ def call_agent(user_message: str) -> str:
         "Content-Type": "application/json",
     }
 
-    # Formato expected por pyfunc endpoint: pandas dataframe en formato 'dataframe_split'
+    # Formato de invocacion para Model Serving chat (coincide con el ejemplo que funciona en Databricks)
     payload = {
-        "dataframe_split": {
-            "columns": ["messages"],
-            "index": [0],
-            "data": [[[
-                {"role": "user", "content": user_message}
-            ]]]
-        }
+        "inputs": [
+            {
+                "messages": [
+                    {"role": "user", "content": user_message}
+                ]
+            }
+        ]
     }
 
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp = requests.post(url, headers=headers, json=payload, timeout=DATABRICKS_TIMEOUT)
         resp.raise_for_status()
     except Exception as e:
         return f"Error al llamar al endpoint de Databricks: {str(e)}"
@@ -48,16 +49,24 @@ def call_agent(user_message: str) -> str:
     # Respuesta pyfunc: normalmente lista de dicts
     try:
         result = resp.json()
-        # Esperamos algo tipo: {"predictions": [{"output": "..."}]} o similar según la config de Serving
-        # Si es el formato estándar de pyfunc en Databricks, suele venir en 'predictions'
         predictions = result.get("predictions") or result.get("data") or result
         if isinstance(predictions, list) and len(predictions) > 0:
             first = predictions[0]
-            if isinstance(first, dict) and "output" in first:
-                return first["output"]
+            if isinstance(first, dict):
+                if "output" in first:
+                    return first["output"]
+                if "output_text" in first:
+                    return first["output_text"]
+                message = first.get("message") or {}
+                if isinstance(message, dict) and "content" in message:
+                    return message["content"]
+                choices = first.get("choices")
+                if isinstance(choices, list) and len(choices) > 0:
+                    choice_msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+                    if isinstance(choice_msg, dict) and "content" in choice_msg:
+                        return choice_msg["content"]
             return str(first)
-        else:
-            return str(result)
+        return str(result)
     except Exception as e:
         return f"Error interpretando la respuesta del endpoint: {str(e)}"
 
