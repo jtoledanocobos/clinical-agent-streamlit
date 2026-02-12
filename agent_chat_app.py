@@ -31,14 +31,16 @@ def call_databricks_agent(user_message: str, thread_id: str) -> str:
     }
 
     # Model Serving chat payload format
-    payload = [
-        {
-            "thread_id": thread_id,
-            "messages": [
-                {"role": "user", "content": user_message}
-            ],
-        }
-    ]
+    payload = {
+        "inputs": [
+            {
+                "thread_id": thread_id,
+                "messages": [
+                    {"role": "user", "content": user_message}
+                ],
+            }
+        ]
+    }
 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=DATABRICKS_TIMEOUT)
