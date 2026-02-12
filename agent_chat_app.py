@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import requests
 import streamlit as st
@@ -6,6 +8,8 @@ import uuid
 # 1. Page configuration
 st.set_page_config(page_title="Clinical Readmission Risk Agent", layout="wide")
 st.title("🏥 Clinical Readmission Risk Agent")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 st.markdown("""
 This app connects to your Databricks Model Serving endpoint
@@ -42,6 +46,9 @@ def call_databricks_agent(user_message: str, thread_id: str) -> str:
         ]
     }
 
+    logging.info("Calling Databricks endpoint: %s", url)
+    logging.info("Request payload: %s", json.dumps(payload, ensure_ascii=True))
+
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=DATABRICKS_TIMEOUT)
         response.raise_for_status()
@@ -50,6 +57,8 @@ def call_databricks_agent(user_message: str, thread_id: str) -> str:
 
     # Pyfunc response: usually a list of dicts
     try:
+        logging.info("Response status: %s", response.status_code)
+        logging.info("Response body: %s", response.text)
         result = response.json()
         # Expected: {"predictions": [{"output": "..."}]} or similar depending on Serving config
         # Standard pyfunc format typically uses 'predictions'
