@@ -1,6 +1,7 @@
 import os
 import requests
 import streamlit as st
+import uuid
 
 # 1. Page configuration
 st.set_page_config(page_title="Clinical Readmission Risk Agent", layout="wide")
@@ -22,7 +23,7 @@ if not (DATABRICKS_HOST and DATABRICKS_TOKEN and SERVING_ENDPOINT):
     st.stop()
 
 # 3. Databricks Serving call
-def call_databricks_agent(user_message: str) -> str:
+def call_databricks_agent(user_message: str, thread_id: str) -> str:
     url = f"{DATABRICKS_HOST}/serving-endpoints/{SERVING_ENDPOINT}/invocations"
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
@@ -30,15 +31,14 @@ def call_databricks_agent(user_message: str) -> str:
     }
 
     # Model Serving chat payload format
-    payload = {
-        "inputs": [
-            {
-                "messages": [
-                    {"role": "user", "content": user_message}
-                ]
-            }
-        ]
-    }
+    payload = [
+        {
+            "thread_id": thread_id,
+            "messages": [
+                {"role": "user", "content": user_message}
+            ],
+        }
+    ]
 
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=DATABRICKS_TIMEOUT)
@@ -64,6 +64,13 @@ def call_databricks_agent(user_message: str) -> str:
 # 4. Conversation state
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
+
+# 4a. New conversation control
+if st.sidebar.button("New conversation"):
+    st.session_state.messages = []
+    st.session_state.thread_id = str(uuid.uuid4())
 
 # 5. Render history
 for message in st.session_state.messages:
@@ -82,7 +89,7 @@ if user_input:
     # Call the agent via Serving
     with st.chat_message("assistant"):
         with st.spinner("Analyzing patient and protocols..."):
-            output = call_databricks_agent(user_input)
+            output = call_databricks_agent(user_input, st.session_state.thread_id)
             st.markdown(output)
             st.session_state.messages.append({"role": "assistant", "content": output})
 
