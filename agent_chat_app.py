@@ -2,100 +2,90 @@ import os
 import requests
 import streamlit as st
 
-# 1. Configuración de la página
+# 1. Page configuration
 st.set_page_config(page_title="Clinical Readmission Risk Agent", layout="wide")
 st.title("🏥 Clinical Readmission Risk Agent")
 
 st.markdown("""
-Esta app se conecta a tu endpoint de Model Serving en Databricks
-y permite chatear con el agente clínico sobre riesgo de reingreso.
+This app connects to your Databricks Model Serving endpoint
+and lets you chat with the clinical agent about readmission risk.
 """)
 
-# 2. Leer configuración desde secretos
+# 2. Read configuration from secrets
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 SERVING_ENDPOINT = os.environ.get("DATABRICKS_SERVING_ENDPOINT")
-DATABRICKS_TIMEOUT = int(os.environ.get("DATABRICKS_TIMEOUT", "120"))
 
 if not (DATABRICKS_HOST and DATABRICKS_TOKEN and SERVING_ENDPOINT):
-    st.error("Faltan variables DATABRICKS_HOST, DATABRICKS_TOKEN o DATABRICKS_SERVING_ENDPOINT en los secrets de Streamlit.")
+    st.error("Missing DATABRICKS_HOST, DATABRICKS_TOKEN, or DATABRICKS_SERVING_ENDPOINT in Streamlit secrets.")
     st.stop()
 
-# 3. Función para llamar al endpoint de Databricks Serving
-def call_agent(user_message: str) -> str:
+# 3. Databricks Serving call
+def call_databricks_agent(user_message: str) -> str:
     url = f"{DATABRICKS_HOST}/serving-endpoints/{SERVING_ENDPOINT}/invocations"
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
         "Content-Type": "application/json",
     }
 
-    # Formato de invocacion para Model Serving chat (coincide con el ejemplo que funciona en Databricks)
+    # Expected pyfunc payload: pandas dataframe in 'dataframe_split' format
     payload = {
-        "inputs": [
-            {
-                "messages": [
-                    {"role": "user", "content": user_message}
-                ]
-            }
-        ]
+        "dataframe_split": {
+            "columns": ["messages"],
+            "index": [0],
+            "data": [[[
+                {"role": "user", "content": user_message}
+            ]]]
+        }
     }
 
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=DATABRICKS_TIMEOUT)
-        resp.raise_for_status()
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
     except Exception as e:
-        return f"Error al llamar al endpoint de Databricks: {str(e)}"
+        return f"Error calling Databricks endpoint: {str(e)}"
 
-    # Respuesta pyfunc: normalmente lista de dicts
+    # Pyfunc response: usually a list of dicts
     try:
-        result = resp.json()
+        result = response.json()
+        # Expected: {"predictions": [{"output": "..."}]} or similar depending on Serving config
+        # Standard pyfunc format typically uses 'predictions'
         predictions = result.get("predictions") or result.get("data") or result
         if isinstance(predictions, list) and len(predictions) > 0:
-            first = predictions[0]
-            if isinstance(first, dict):
-                if "output" in first:
-                    return first["output"]
-                if "output_text" in first:
-                    return first["output_text"]
-                message = first.get("message") or {}
-                if isinstance(message, dict) and "content" in message:
-                    return message["content"]
-                choices = first.get("choices")
-                if isinstance(choices, list) and len(choices) > 0:
-                    choice_msg = choices[0].get("message") if isinstance(choices[0], dict) else None
-                    if isinstance(choice_msg, dict) and "content" in choice_msg:
-                        return choice_msg["content"]
-            return str(first)
+            first_prediction = predictions[0]
+            if isinstance(first_prediction, dict) and "output" in first_prediction:
+                return first_prediction["output"]
+            return str(first_prediction)
         return str(result)
     except Exception as e:
-        return f"Error interpretando la respuesta del endpoint: {str(e)}"
+        return f"Error parsing endpoint response: {str(e)}"
 
-# 4. Estado de la conversación
+# 4. Conversation state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 5. Mostrar historial
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# 5. Render history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# 6. Entrada de usuario
-user_input = st.chat_input("Describe el caso clínico del paciente...")
+# 6. User input
+user_input = st.chat_input("Describe the patient's clinical case...")
 
 if user_input:
-    # Guardar mensaje usuario
+    # Store user message
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Llamar al agente vía Serving
+    # Call the agent via Serving
     with st.chat_message("assistant"):
-        with st.spinner("Analizando paciente y protocolos..."):
-            output = call_agent(user_input)
+        with st.spinner("Analyzing patient and protocols..."):
+            output = call_databricks_agent(user_input)
             st.markdown(output)
             st.session_state.messages.append({"role": "assistant", "content": output})
 
-st.sidebar.markdown("### Ejemplo de prompt")
+st.sidebar.markdown("### Sample prompt")
 st.sidebar.code(
     "I have a 75-year-old patient who has been in the hospital for 5 days and has 3 prior visits. "
     "I have diabetes, I don't have hyperglycemia and I have 10 medications. "
