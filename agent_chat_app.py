@@ -15,6 +15,7 @@ and lets you chat with the clinical agent about readmission risk.
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN")
 SERVING_ENDPOINT = os.environ.get("DATABRICKS_SERVING_ENDPOINT")
+DATABRICKS_TIMEOUT = int(os.environ.get("DATABRICKS_TIMEOUT", "120"))
 
 if not (DATABRICKS_HOST and DATABRICKS_TOKEN and SERVING_ENDPOINT):
     st.error("Missing DATABRICKS_HOST, DATABRICKS_TOKEN, or DATABRICKS_SERVING_ENDPOINT in Streamlit secrets.")
@@ -28,19 +29,19 @@ def call_databricks_agent(user_message: str) -> str:
         "Content-Type": "application/json",
     }
 
-    # Expected pyfunc payload: pandas dataframe in 'dataframe_split' format
+    # Model Serving chat payload format
     payload = {
-        "dataframe_split": {
-            "columns": ["messages"],
-            "index": [0],
-            "data": [[[
-                {"role": "user", "content": user_message}
-            ]]]
-        }
+        "inputs": [
+            {
+                "messages": [
+                    {"role": "user", "content": user_message}
+                ]
+            }
+        ]
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        response = requests.post(url, headers=headers, json=payload, timeout=DATABRICKS_TIMEOUT)
         response.raise_for_status()
     except Exception as e:
         return f"Error calling Databricks endpoint: {str(e)}"
